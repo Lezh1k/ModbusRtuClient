@@ -50,8 +50,6 @@ static uint16_t mb_send_response(mb_adu_t *adu);
 static void mb_send_exc_response(mbec_exception_code_t exc_code, mb_adu_t *adu);
 static mb_request_handler_t* mb_validate_function_code(mb_adu_t* adu);
 
-static void handle_incomplete_message(uint8_t *data, uint16_t len);
-static void handle_wrong_crc(uint16_t expected_crc, uint16_t real_crc);
 static void handle_broadcast_message(uint8_t *data, uint16_t len);
 //////////////////////////////////////////////////////////////////////////
 
@@ -72,7 +70,7 @@ static uint16_t diag_return_server_busy_count(mb_adu_t *adu);
 static uint16_t diag_return_bus_character_overrun_count(mb_adu_t *adu);
 static uint16_t diag_clear_overrun_counter_and_flag(mb_adu_t *adu);
 
-typedef uint8_t* (*pf_diagnostic_data_t)(mb_adu_t *adu);
+typedef uint16_t (*pf_diagnostic_data_t)(mb_adu_t *adu);
 static pf_diagnostic_data_t diagnostic_data_handlers[] = {
   diag_return_query_data, diag_restart_communications_option, diag_return_diagnostic_register,
   diag_change_adcii_input_delimiter, diag_force_listen_only_mode,
@@ -657,7 +655,7 @@ uint16_t execute_read_exception_status(mb_adu_t *adu) {
   if (!adu->data)
     return mbec_heap_error;
   *adu->data = m_exception_status;
-  return adu;
+  return mbec_OK;
 }
 //////////////////////////////////////////////////////////////////////////
 
