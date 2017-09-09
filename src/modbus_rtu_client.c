@@ -318,10 +318,9 @@ check_write_single_coil_data(mb_adu_t *adu) {
 
 uint16_t
 check_write_multiple_coils_data(mb_adu_t *adu) {
-    uint16_t address = U16_MSB_from_stream(adu->data);
-    uint16_t quantity = U16_MSB_from_stream(adu->data + 2);
-    uint8_t byte_count = *(adu->data + 4);
-    uint8_t* data = adu->data + 5;
+  uint16_t address = U16_MSB_from_stream(adu->data);
+  uint16_t quantity = U16_MSB_from_stream(adu->data + 2);
+  uint8_t byte_count = *(adu->data + 4);
 
   return (quantity >= 1 && quantity <= 0x07d0) &&
       (byte_count == nearest_8_multiple(quantity) / 8) &&
