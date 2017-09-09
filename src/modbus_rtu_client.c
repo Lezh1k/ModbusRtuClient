@@ -652,7 +652,7 @@ uint16_t execute_read_exception_status(mb_adu_t *adu) {
   if (!adu->data)
     return mbec_heap_error;
   *adu->data = m_exception_status;
-  return adu;
+  return mbec_OK;
 }
 //////////////////////////////////////////////////////////////////////////
 
