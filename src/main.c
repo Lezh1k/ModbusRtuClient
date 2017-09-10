@@ -6,16 +6,13 @@
 
 void
 send_stub(uint8_t *data, uint16_t len) {
-  while(len--) {
-    printf("%x ", *data);
-    ++data;
-  }
+  while(len--)
+    printf("%x ", *data++);
   printf("\n");
 }
 ////////////////////////////////////////////////////////////////////////////
 
-int main() {
-
+void mb_test_client() {
   uint8_t input_discrete_real[24] =
   { 0x00, 0x14, 0x22, 0x20, 0x00, 0x00, 0x00, 0x00 };
   //0001 0100 0010 0010 0010 0000
@@ -34,26 +31,21 @@ int main() {
     0x0006, 0x0005, 0x0004,0x0006, 0x0005, 0x0004,
     0x0006, 0x0005, 0x0004,0x0006, 0x0005, 0x0004 };
 
-  mb_client_device_t dev = {
-    .address = 1,  // ID [1..247].
-
-    .input_discrete_map.start_addr = 0,  // r bits
-    .input_discrete_map.end_addr = sizeof(input_discrete_real),
-    .input_discrete_map.real_addr = input_discrete_real,
-
-    .coils_map.start_addr = 0,  // rw bits
-    .coils_map.end_addr = sizeof(coils_real),
-    .coils_map.real_addr = coils_real,
-
-    .input_registers_map.start_addr = 0,  // r registers
-    .input_registers_map.end_addr = sizeof(input_registers_real),
-    .input_registers_map.real_addr = input_registers_real,
-
-    .holding_registers_map.start_addr = 0,  // rw registers
-    .holding_registers_map.end_addr = sizeof(holding_registers_real),
-    .holding_registers_map.real_addr = holding_registers_real,
-    .tp_send = send_stub
-  };
+  mb_client_device_t dev;
+  dev.address = 1;  // ID [1..247].
+  dev.input_discrete_map.start_addr = 0;  // r bits
+  dev.input_discrete_map.end_addr = sizeof(input_discrete_real);
+  dev.input_discrete_map.real_addr = input_discrete_real;
+  dev.coils_map.start_addr = 0;  // rw bits
+  dev.coils_map.end_addr = sizeof(coils_real);
+  dev.coils_map.real_addr = coils_real;
+  dev.input_registers_map.start_addr = 0;  // r registers
+  dev.input_registers_map.end_addr = sizeof(input_registers_real);
+  dev.input_registers_map.real_addr = input_registers_real;
+  dev.holding_registers_map.start_addr = 0;  // rw registers
+  dev.holding_registers_map.end_addr = sizeof(holding_registers_real);
+  dev.holding_registers_map.real_addr = holding_registers_real;
+  dev.tp_send = send_stub;
 
   uint8_t read_coils_arr[] = {
     0x04, 0x01, 0x00, 0x0a,
@@ -99,7 +91,6 @@ int main() {
   };
 
   hm_init();
-
   mb_init(&dev);
 
   dev.address = 4;
@@ -128,6 +119,10 @@ int main() {
   mb_handle_request(request_device_id_arr, sizeof(request_device_id_arr));
   printf("write single register : ");
   mb_handle_request(write_single_register_arr, sizeof(write_single_register_arr));
+}
+//////////////////////////////////////////////////////////////////////////
 
+int main() {
+  mb_test_client();
   return 0;
 }

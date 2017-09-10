@@ -63,7 +63,7 @@ typedef struct mb_counters {
   uint16_t slave_no_resp; //cpt5 return slave no response count
   uint16_t slave_NAK;     //cpt6 return slave NAK count
   uint16_t slave_busy;    //cpt7 return slave busy count
-  uint16_t bus_char_over; //cpt8 return bus character overrun count
+  uint16_t bus_char_overrrun; //cpt8 return bus character overrun count
 } mb_counters_t;
 //////////////////////////////////////////////////////////////////////////
 
@@ -178,13 +178,24 @@ static uint16_t execute_encapsulate_tp_info(mb_adu_t *adu);
 static mb_client_device_t* m_device = NULL;
 static mb_counters_t m_counters = {0};
 static uint8_t m_exception_status = 0x00; //nothing is happened here.
-static uint8_t m_listen_only = 0x00;
 
 /*local variables END*/
+static inline void clear_counters() {
+  m_counters.bus_char_overrrun = 0;
+  m_counters.bus_com_err = 0;
+  m_counters.bus_msg = 0;
+  m_counters.exc_err = 0;
+  m_counters.slave_busy = 0;
+  m_counters.slave_msg = 0;
+  m_counters.slave_NAK = 0;
+  m_counters.slave_no_resp = 0;
+}
+//////////////////////////////////////////////////////////////////////////
 
 void
 mb_init(mb_client_device_t *dev) {
   m_device = dev;
+  clear_counters();
 }
 ////////////////////////////////////////////////////////////////////////////
 
@@ -192,7 +203,7 @@ void
 handle_broadcast_message(uint8_t *data, uint16_t len) {
   UNUSED_ARG(data);
   UNUSED_ARG(len);
-#pragma message ("TODO  implement handle_broadcast_message")
+  //do something. maybe go to silent mode, I don't know
 }
 
 static volatile uint8_t is_busy = 0;
@@ -206,25 +217,25 @@ mb_handle_request(uint8_t *data, uint16_t data_len) {
 
   do {
     if (is_busy) {
-      m_counters.slave_busy++;
+      ++m_counters.slave_busy;
       break; //maybe we need to handle this somehow?
     }
 
     is_busy = 1;
     if (data_len < 3) {
-      m_counters.bus_com_err++;
+      ++m_counters.bus_com_err;
       break;
     }
 
-    real_crc = U16_LSB_from_stream(data + data_len - 2);
+    real_crc = U16_LSBFromStream(data + data_len - 2);
     expected_crc = crc16(data, data_len - 2);
 
     if (real_crc != expected_crc) {
-      m_counters.bus_com_err++;
+      ++m_counters.bus_com_err;
       break;
     }
 
-    m_counters.bus_msg++;
+    ++m_counters.bus_msg;
 
     adu_req = adu_from_stream(data, data_len);
     adu_old_data = adu_req->data;
@@ -232,8 +243,8 @@ mb_handle_request(uint8_t *data, uint16_t data_len) {
 
     if (adu_req->addr == 0) {
       handle_broadcast_message(data, data_len);
-      m_counters.slave_msg++;
-      m_counters.slave_no_resp++;
+      ++m_counters.slave_msg;
+      ++m_counters.slave_no_resp;
       break;
     }
 
@@ -242,25 +253,25 @@ mb_handle_request(uint8_t *data, uint16_t data_len) {
 
     m_counters.slave_msg++;
     if (!rh->fc_validation_result) {
-      m_counters.exc_err++;
+      ++m_counters.exc_err;
       mb_send_exc_response(res = mbec_illegal_function, adu_req);
       break;
     }
 
     if (!rh->pf_check_address(adu_req)) {
-      m_counters.exc_err++;
+      ++m_counters.exc_err;
       mb_send_exc_response(res = mbec_illegal_data_address, adu_req);
       break;
     }
 
     if (!rh->pf_validate_data_value(adu_req)) {
-      m_counters.exc_err++;
+      ++m_counters.exc_err;
       mb_send_exc_response(res = mbec_illegal_data_value, adu_req);
       break;
     }
 
     if ((res = rh->pf_execute_function(adu_req))) {
-      m_counters.exc_err++;
+      ++m_counters.exc_err;
       mb_send_exc_response(res, adu_req);
       break;
     }
@@ -279,12 +290,11 @@ mb_handle_request(uint8_t *data, uint16_t data_len) {
 }
 ////////////////////////////////////////////////////////////////////////////
 
-
 uint16_t
 check_read_discrete_input_data(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data+2);
-  uint16_t bl = nearest_8_multiple(quantity) / 8;
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data+2);
+  uint16_t bl = nearestMultipleOf8(quantity) / 8;
 
   return (quantity >= 1 && quantity <= 0x07d0) &&
       (bl + address / 8 < m_device->input_discrete_map.end_addr &&
@@ -294,9 +304,9 @@ check_read_discrete_input_data(mb_adu_t *adu) {
 
 uint16_t
 check_read_coils_data(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data+2);
-  uint16_t bn = nearest_8_multiple(quantity) / 8;
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data+2);
+  uint16_t bn = nearestMultipleOf8(quantity) / 8;
 
   return (quantity >= 1 && quantity <= 0x07d0) &&
       (bn + address / 8 < m_device->coils_map.end_addr &&
@@ -306,8 +316,8 @@ check_read_coils_data(mb_adu_t *adu) {
 
 uint16_t
 check_write_single_coil_data(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t coil_state = U16_MSB_from_stream(adu->data+2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t coil_state = U16_MSBFromStream(adu->data+2);
   if (coil_state != coin_state_off && coil_state != coin_state_on)
     return 0u;
 
@@ -318,12 +328,12 @@ check_write_single_coil_data(mb_adu_t *adu) {
 
 uint16_t
 check_write_multiple_coils_data(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data + 2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data + 2);
   uint8_t byte_count = *(adu->data + 4);
 
   return (quantity >= 1 && quantity <= 0x07d0) &&
-      (byte_count == nearest_8_multiple(quantity) / 8) &&
+      (byte_count == nearestMultipleOf8(quantity) / 8) &&
       (address / 8 >= m_device->coils_map.start_addr &&
        address / 8 + byte_count < m_device->coils_map.end_addr);
 }
@@ -331,8 +341,8 @@ check_write_multiple_coils_data(mb_adu_t *adu) {
 
 uint16_t
 check_read_input_registers_data(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data+2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data+2);
 
   return (quantity >= 1 && quantity <= 0x007d) &&
       (address >= m_device->input_registers_map.start_addr) &&
@@ -342,8 +352,8 @@ check_read_input_registers_data(mb_adu_t *adu) {
 
 uint16_t
 check_read_holding_registers_data(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data+2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data+2);
 
   return (quantity >= 1 && quantity <= 0x007d) &&
       (address >= m_device->holding_registers_map.start_addr &&
@@ -353,9 +363,7 @@ check_read_holding_registers_data(mb_adu_t *adu) {
 
 uint16_t
 check_write_single_register_data(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t data = U16_MSB_from_stream(adu->data+2);
-
+  uint16_t address = U16_MSBFromStream(adu->data);
   return address >= m_device->holding_registers_map.start_addr &&
       address < m_device->holding_registers_map.end_addr;
 }
@@ -363,24 +371,37 @@ check_write_single_register_data(mb_adu_t *adu) {
 
 uint16_t
 check_write_multiple_registers_data(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data + 2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data + 2);
+  uint8_t byte_count = *(adu->data + 4);
 
-  return address >= m_device->holding_registers_map.start_addr &&
+  return quantity >= 1 &&
+      quantity <= 0x0079 &&
+      byte_count == quantity * 2 &&
+      address >= m_device->holding_registers_map.start_addr &&
       address + quantity < m_device->holding_registers_map.end_addr;
 }
 //////////////////////////////////////////////////////////////////////////
 
 uint16_t
 check_read_write_multiple_registers_data(mb_adu_t *adu) {
-  UNUSED_ARG(adu);
-  return 0;
+  uint16_t read_start_addr = U16_MSBFromStream(adu->data);
+  uint16_t read_quantity = U16_MSBFromStream(adu->data + 2);
+  uint16_t write_start_addr = U16_MSBFromStream(adu->data + 4);
+  uint16_t write_quantity = U16_MSBFromStream(adu->data + 6);
+  uint8_t write_byte_count = *(adu->data + 8);
+
+  return read_quantity >= 1 && read_quantity <= 0x007d &&
+      write_quantity >= 1 && write_quantity <= 0x0079 &&
+      write_byte_count == write_quantity * 2 &&
+      read_start_addr + read_quantity < m_device->holding_registers_map.end_addr &&
+      write_start_addr + write_quantity < m_device->holding_registers_map.end_addr;
 }
 //////////////////////////////////////////////////////////////////////////
 
 uint16_t
 check_mask_write_registers_data(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
+  uint16_t address = U16_MSBFromStream(adu->data);
   return address >= m_device->holding_registers_map.start_addr &&
       address < m_device->holding_registers_map.end_addr;
 }
@@ -416,7 +437,7 @@ check_read_exception_status_data(mb_adu_t *adu) {
 
 uint16_t
 check_diagnostic_data(mb_adu_t *adu) {
-  uint16_t sub_function = U16_MSB_from_stream(adu->data);
+  uint16_t sub_function = U16_MSBFromStream(adu->data);
   return sub_function < sizeof(diagnostic_data_handlers) / sizeof(pf_diagnostic_data_t)
       && diagnostic_data_handlers[sub_function];
 }
@@ -425,7 +446,7 @@ check_diagnostic_data(mb_adu_t *adu) {
 uint16_t
 check_get_com_event_counter_data(mb_adu_t *adu) {
   UNUSED_ARG(adu);
-  return 0u;
+  return 1u;
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -445,8 +466,8 @@ check_report_device_id_data(mb_adu_t *adu) {
 
 uint16_t
 check_encapsulate_tp_info_data(mb_adu_t *adu) {
-  UNUSED_ARG(adu);
-  return 0u;
+  uint8_t mei_type = *(adu->data);
+  return mei_type == 0x0d || mei_type == 0x0e;
 }
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
@@ -459,10 +480,10 @@ uint16_t mb_read_bits(mb_adu_t *adu, uint8_t *real_addr) {
   register uint8_t i;
   register uint8_t rshift;
   register uint8_t* tmp ;
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data+2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data+2);
 
-  bc = nearest_8_multiple(quantity) / 8;
+  bc = nearestMultipleOf8(quantity) / 8;
   adu->data_len = bc + 1;
 
   if (!(adu->data = (uint8_t*) hm_malloc(adu->data_len + 1)))
@@ -502,8 +523,8 @@ uint16_t execute_read_coils(mb_adu_t *adu) {
 //////////////////////////////////////////////////////////////////////////
 
 uint16_t execute_write_single_coil(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t coil_state = U16_MSB_from_stream(adu->data+2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t coil_state = U16_MSBFromStream(adu->data+2);
   if (coil_state == coin_state_off)
     m_device->coils_map.real_addr[address / 8] &= ~(0x80 >> address % 8);
   else
@@ -518,8 +539,8 @@ uint16_t execute_write_multiple_coils(mb_adu_t *adu) {
   register uint16_t ba;
   register uint8_t shift;
 
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data + 2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data + 2);
   uint8_t byte_count = *(adu->data + 4);
   uint8_t *data = adu->data + 5;
 
@@ -550,8 +571,8 @@ uint16_t mb_read_registers(mb_adu_t *adu,
                            uint16_t *real_addr) {
   int16_t i;
   uint8_t* tmp;
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data + 2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data + 2);
   adu->data_len = quantity*sizeof(mb_register) + 1;
   adu->data = (uint8_t*) hm_malloc(adu->data_len);
   if (!adu->data)
@@ -561,7 +582,7 @@ uint16_t mb_read_registers(mb_adu_t *adu,
   tmp = adu->data + 1;
 
   for (i = 0; i < quantity; ++i, tmp += sizeof(mb_register)) {
-    U16_MSB_to_stream(real_addr[address + i], tmp);
+    U16_MSB2Stream(real_addr[address + i], tmp);
   }
   return mbec_OK;
 }
@@ -577,8 +598,8 @@ uint16_t execute_read_holding_registers(mb_adu_t *adu) {
 //////////////////////////////////////////////////////////////////////////
 
 uint16_t execute_write_single_register(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t data = U16_MSB_from_stream(adu->data+2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t data = U16_MSBFromStream(adu->data+2);
   m_device->holding_registers_map.real_addr[address] = data;
   //we don't do anything with adu, should return it as is
   return mbec_OK;
@@ -587,8 +608,8 @@ uint16_t execute_write_single_register(mb_adu_t *adu) {
 
 uint16_t execute_write_multiple_registers(mb_adu_t *adu) {
 
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t quantity = U16_MSB_from_stream(adu->data + 2);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t quantity = U16_MSBFromStream(adu->data + 2);
   uint8_t byte_count = *(adu->data + 4);
   uint8_t *data = adu->data + 5;
 
@@ -601,23 +622,45 @@ uint16_t execute_write_multiple_registers(mb_adu_t *adu) {
   while (byte_count--)
     *(tmp++) = *(data++);
 
-  U16_MSB_to_stream(address, adu->data);
-  U16_MSB_to_stream(quantity, adu->data+2);
+  U16_MSB2Stream(address, adu->data);
+  U16_MSB2Stream(quantity, adu->data+2);
   return mbec_OK;
 }
 //////////////////////////////////////////////////////////////////////////
 
 uint16_t execute_read_write_multiple_registers(mb_adu_t *adu) {
-  UNUSED_ARG(adu);
-  return 0u;
+  uint16_t read_start_addr = U16_MSBFromStream(adu->data);
+  uint16_t read_quantity = U16_MSBFromStream(adu->data + 2);
+  uint16_t write_start_addr = U16_MSBFromStream(adu->data + 4);
+  uint8_t write_byte_count = *(adu->data + 8);
+  uint8_t *write_data = adu->data + 9;
+  uint8_t* tmp;
+  uint16_t i;
+
+  adu->data_len = read_quantity*sizeof(mb_register) + 1;
+  adu->data = (uint8_t*) hm_malloc(adu->data_len);
+  if (!adu->data)
+    return mbec_heap_error;
+
+  adu->data[0] = adu->data_len - 1;
+  tmp = adu->data + 1;
+  for (i = 0; i < read_quantity; ++i, tmp += sizeof(mb_register)) {
+    U16_MSB2Stream(m_device->holding_registers_map.real_addr[read_start_addr + i], tmp);
+  }
+
+  tmp = (uint8_t*) &m_device->holding_registers_map.real_addr[write_start_addr];
+  while (write_byte_count--)
+    *(tmp++) = *(write_data++);
+
+  return mbec_OK;
 }
 //////////////////////////////////////////////////////////////////////////
 
 //Result = (Current Contents AND And_Mask) OR (Or_Mask AND (NOT And_Mask))
 uint16_t execute_mask_write_registers(mb_adu_t *adu) {
-  uint16_t address = U16_MSB_from_stream(adu->data);
-  uint16_t and_mask = U16_MSB_from_stream(adu->data+2);
-  uint16_t or_mask = U16_MSB_from_stream(adu->data+4);
+  uint16_t address = U16_MSBFromStream(adu->data);
+  uint16_t and_mask = U16_MSBFromStream(adu->data+2);
+  uint16_t or_mask = U16_MSBFromStream(adu->data+4);
 
   m_device->holding_registers_map.real_addr[address] =
       (m_device->holding_registers_map.real_addr[address] & and_mask) |
@@ -662,7 +705,7 @@ uint16_t diag_return_query_data(mb_adu_t *adu) {
 ////////////////////////////////////////////////////////////////////////////
 
 uint16_t diag_restart_communications_option(mb_adu_t *adu) {
-  uint16_t clear_communication_event_log = U16_MSB_from_stream(adu->data+2);
+  uint16_t clear_communication_event_log = U16_MSBFromStream(adu->data+2);
   switch (clear_communication_event_log) {
     case 0xff00:
       //todo clear_communication_event_log
@@ -674,7 +717,7 @@ uint16_t diag_restart_communications_option(mb_adu_t *adu) {
   }
 
   //todo restart communications
-  diag_clean_counter_and_diagnostic_registers(adu);
+  clear_counters();
   return mbec_OK;
 }
 ////////////////////////////////////////////////////////////////////////////
@@ -699,68 +742,75 @@ uint16_t diag_force_listen_only_mode(mb_adu_t *adu) {
 
 uint16_t diag_clean_counter_and_diagnostic_registers(mb_adu_t *adu) {
   UNUSED_ARG(adu);
-  m_counters.bus_msg = 0;
-  m_counters.bus_com_err = 0;
-  m_counters.exc_err = 0;
-  m_counters.slave_msg = 0;
-  m_counters.slave_no_resp = 0;
-  m_counters.slave_NAK = 0;
-  m_counters.slave_busy = 0;
-  m_counters.bus_char_over = 0;
+  clear_counters();
   return mbec_OK;
 }
 ////////////////////////////////////////////////////////////////////////////
 
-uint16_t diag_return_bus_messages_count(mb_adu_t *adu) {
+static inline uint16_t diag_return_some_counter(mb_adu_t *adu, uint16_t val) {
+  uint16_t sf = U16_MSBFromStream(adu->data); //sub function
+  if (!(adu->data = (uint8_t*) hm_malloc(4)))
+    return mbec_heap_error;
+  adu->data_len = 4;
+  U16_MSB2Stream(sf, adu->data);
+  U16_MSB2Stream(val, adu->data+2);
   return mbec_OK;
+}
+
+uint16_t diag_return_bus_messages_count(mb_adu_t *adu) {
+  return diag_return_some_counter(adu, m_counters.bus_msg);
 }
 
 uint16_t diag_return_bus_communication_error_count(mb_adu_t *adu) {
-  return mbec_OK;
+  return diag_return_some_counter(adu, m_counters.bus_com_err);
 }
 
 uint16_t diag_return_bus_exception_error_count(mb_adu_t *adu) {
-  return mbec_OK;
+  return diag_return_some_counter(adu, m_counters.exc_err);
 }
 
 uint16_t diag_return_server_messages_count(mb_adu_t *adu) {
-  return mbec_OK;
+  return diag_return_some_counter(adu, m_counters.slave_msg);
 }
 
 uint16_t diag_return_server_no_response_count(mb_adu_t *adu) {
-  return mbec_OK;
+  return diag_return_some_counter(adu, m_counters.slave_no_resp);
 }
 
 uint16_t diag_return_server_NAK_count(mb_adu_t *adu) {
-  return mbec_OK;
+  return diag_return_some_counter(adu, m_counters.slave_NAK);
 }
 
 uint16_t diag_return_server_busy_count(mb_adu_t *adu) {
-  return mbec_OK;
+  return diag_return_some_counter(adu, m_counters.slave_busy);
 }
 
 uint16_t diag_return_bus_character_overrun_count(mb_adu_t *adu) {
-  return mbec_OK;
+  return diag_return_some_counter(adu, m_counters.bus_char_overrrun);
 }
 
 uint16_t diag_clear_overrun_counter_and_flag(mb_adu_t *adu) {
+  UNUSED_ARG(adu);
+  m_counters.bus_char_overrrun = 0;
   return mbec_OK;
 }
 
 uint16_t execute_diagnostic(mb_adu_t *adu) {
-  uint16_t sub_function = U16_MSB_from_stream(adu->data);
+  uint16_t sub_function = U16_MSBFromStream(adu->data);
   pf_diagnostic_data_t handler = diagnostic_data_handlers[sub_function];
   return handler(adu);
 }
 //////////////////////////////////////////////////////////////////////////
 
-uint16_t execute_get_com_event_counter(mb_adu_t *adu) {
-  return mbec_OK;
+uint16_t execute_get_com_event_counter(mb_adu_t *adu) {  
+  UNUSED_ARG(adu); //todo implement this later
+  return mbec_illegal_function;
 }
 //////////////////////////////////////////////////////////////////////////
 
 uint16_t execute_get_com_event_log(mb_adu_t *adu) {
-  return mbec_OK;
+  UNUSED_ARG(adu);
+  return mbec_illegal_function;
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -776,8 +826,9 @@ uint16_t execute_report_device_id(mb_adu_t *adu) {
 }
 //////////////////////////////////////////////////////////////////////////
 
-uint16_t execute_encapsulate_tp_info(mb_adu_t *adu) {
-  return mbec_OK;
+uint16_t execute_encapsulate_tp_info(mb_adu_t *adu) {  
+  UNUSED_ARG(adu);
+  return mbec_illegal_function;
 }
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
@@ -786,7 +837,7 @@ uint16_t execute_encapsulate_tp_info(mb_adu_t *adu) {
 
 mb_request_handler_t*
 mb_validate_function_code(mb_adu_t* adu) {
-  //maybe it's better to use switch
+  //maybe it's better to use switch, because this table takes ~ 19*(1+2+3*sizeof(funciton_pointer))B
   enum {fc_is_not_supported = 0, fc_is_supported = 1};
 
   static mb_request_handler_t handlers[] = {
@@ -838,7 +889,7 @@ mb_validate_function_code(mb_adu_t* adu) {
     {mbfc_diagnostic, fc_is_supported, check_address_and_return_ok,
      check_diagnostic_data, execute_diagnostic },
 
-    {mbfc_get_com_event_counter, fc_is_supported, check_address_and_return_ok,
+    {mbfc_get_com_event_counter, fc_is_not_supported, check_address_and_return_ok,
      check_get_com_event_counter_data, execute_get_com_event_counter },
 
     {mbfc_get_com_event_log, fc_is_supported, check_address_and_return_ok,
@@ -879,14 +930,13 @@ mb_send_exc_response(mbec_exception_code_t exc_code, mb_adu_t* adu) {
   uint8_t resp[5] = {adu->addr,
                      adu->fc | 0x80,
                      exc_code };
-  U16_LSB_to_stream(crc16(resp, 3), resp + 3);
+  U16_LSB2Stream(crc16(resp, 3), resp + 3);
   m_device->tp_send(resp, 5);
 }
 ////////////////////////////////////////////////////////////////////////////
 
 mb_adu_t*
 adu_from_stream(uint8_t *data, uint16_t len) {
-
   mb_adu_t* result = (mb_adu_t*) hm_malloc(sizeof(mb_adu_t));
   if (!result) return result;
 
@@ -899,7 +949,7 @@ adu_from_stream(uint8_t *data, uint16_t len) {
                             sizeof(result->data) -
                             sizeof(result->data_len));
   data += result->data_len;
-  result->crc = U16_LSB_from_stream(data);
+  result->crc = U16_LSBFromStream(data);
   return result;
 }
 ////////////////////////////////////////////////////////////////////////////
@@ -922,7 +972,7 @@ adu_serialize(mb_adu_t *adu) {
   }
 
   crc = crc16(buffer, adu_buffer_len(adu) - sizeof(crc));
-  U16_LSB_to_stream(crc, tmp);
+  U16_LSB2Stream(crc, tmp);
   return buffer;
 }
 //////////////////////////////////////////////////////////////////////////
@@ -934,34 +984,34 @@ valid_register_addr(mb_dev_registers_mapping_t *mapping, uint16_t addr) {
 
 static inline uint8_t
 valid_bit_addr(mb_dev_bit_mapping_t *mapping, uint16_t bit_addr) {
-  uint16_t n8 = nearest_8_multiple(bit_addr) / 8;
+  uint16_t n8 = nearestMultipleOf8(bit_addr) / 8;
   return n8 >= mapping->start_addr && n8 < mapping->end_addr;
 }
 
 uint16_t
 check_discrete_input_address(mb_adu_t *adu) {
-  uint16_t addr = U16_MSB_from_stream(adu->data);
+  uint16_t addr = U16_MSBFromStream(adu->data);
   return m_device && valid_bit_addr(&m_device->input_discrete_map, addr);
 }
 //////////////////////////////////////////////////////////////////////////
 
 uint16_t
 check_coils_address(mb_adu_t *adu) {
-  uint16_t addr = U16_MSB_from_stream(adu->data);
+  uint16_t addr = U16_MSBFromStream(adu->data);
   return m_device && valid_bit_addr(&m_device->coils_map, addr);
 }
 //////////////////////////////////////////////////////////////////////////
 
 uint16_t
 check_input_registers_address(mb_adu_t *adu) {
-  uint16_t addr = U16_MSB_from_stream(adu->data);
+  uint16_t addr = U16_MSBFromStream(adu->data);
   return m_device && valid_register_addr(&m_device->input_registers_map, addr);
 }
 //////////////////////////////////////////////////////////////////////////
 
 uint16_t
 check_holding_registers_address(mb_adu_t *adu) {
-  uint16_t addr = U16_MSB_from_stream(adu->data);
+  uint16_t addr = U16_MSBFromStream(adu->data);
   return m_device && valid_register_addr(&m_device->holding_registers_map, addr);
 }
 //////////////////////////////////////////////////////////////////////////
